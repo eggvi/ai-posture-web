@@ -150,23 +150,34 @@ export default function Home() {
   const caseRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const requestedLanguage = params.get("lang")?.toLowerCase();
-    setEmbedded(params.get("embedded") === "1");
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      const params = new URLSearchParams(window.location.search);
+      const requestedLanguage = params.get("lang")?.toLowerCase();
+      setEmbedded(params.get("embedded") === "1");
 
-    if (requestedLanguage?.startsWith("en")) {
-      setLanguage("en");
-    } else if (requestedLanguage?.startsWith("zh")) {
-      setLanguage("zh");
-    } else if (navigator.language.toLowerCase().startsWith("en")) {
-      setLanguage("en");
-    }
+      if (requestedLanguage?.startsWith("en")) {
+        setLanguage("en");
+      } else if (requestedLanguage?.startsWith("zh")) {
+        setLanguage("zh");
+      } else if (navigator.language.toLowerCase().startsWith("en")) {
+        setLanguage("en");
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const t = content[language];
   const pageClass = useMemo(
     () => `site-shell ${embedded ? "is-embedded" : "is-browser"}`,
     [embedded],
+  );
+  const ctaHref = useMemo(
+    () => `/ai-posture/start?lang=${language === "zh" ? "zh-CN" : "en"}&embedded=${embedded ? "1" : "0"}&source=${embedded ? "ios_product_detail" : "web_landing"}`,
+    [embedded, language],
   );
 
   const scroll = (ref: React.RefObject<HTMLDivElement | null>, direction: -1 | 1) => {
@@ -197,18 +208,6 @@ export default function Home() {
             {t.language}
           </button>
         </header>
-      )}
-
-      {embedded && (
-        <div className="embedded-bar">
-          <div className="brand compact">
-            <img src="/images/brand/logo.jpg" alt="" />
-            <span>{t.brand}</span>
-          </div>
-          <button className="language-switch" type="button" onClick={switchLanguage}>
-            {t.language}
-          </button>
-        </div>
       )}
 
       <main id="top">
@@ -332,10 +331,12 @@ export default function Home() {
         <p>{t.footer}</p>
       </footer>
 
-      <div className="sticky-cta" role="region" aria-label={t.cta}>
-        <a href="/ai-posture/start">{t.cta}</a>
-        <span>{t.ctaNote}</span>
-      </div>
+      {!embedded && (
+        <div className="sticky-cta" role="region" aria-label={t.cta}>
+          <a href={ctaHref}>{t.cta}</a>
+          <span>{t.ctaNote}</span>
+        </div>
+      )}
     </div>
   );
 }

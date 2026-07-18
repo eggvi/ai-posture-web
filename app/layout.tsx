@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  referrer: "no-referrer",
   title: "蛋壳跟练 AI 体态评估 | EggFitness",
   description: "上传正面、侧面和背面照片，约 2 分钟获得 AI 体态报告与个性化训练方向。",
   icons: {

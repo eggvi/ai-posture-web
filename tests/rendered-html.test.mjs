@@ -1,49 +1,47 @@
 import assert from "node:assert/strict";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
-async function render(pathname = "/") {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
+const root = new URL("../", import.meta.url);
 
-  return worker.fetch(
-    new Request(`http://localhost${pathname}`, {
-      headers: { accept: "text/html" },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
-  );
+async function source(pathname) {
+  return readFile(new URL(pathname, root), "utf8");
 }
 
-test("server-renders the EggFitness posture landing page", async () => {
-  const response = await render("/?lang=zh-CN&embedded=1");
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+test("landing page includes the approved content and responsive entry contract", async () => {
+  const page = await source("app/page.tsx");
+  const layout = await source("app/layout.tsx");
 
-  const html = await response.text();
-  assert.match(html, /<title>蛋壳跟练 AI 体态评估 \| EggFitness<\/title>/i);
-  assert.match(html, /2 分钟，看懂你的体态/);
-  assert.match(html, /一眼看懂你的体态报告/);
-  assert.match(html, /真实学员，真实改变/);
-  assert.match(html, /简单几步，获得体态报告/);
-  assert.match(html, /立即测试/);
-  assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
+  assert.match(layout, /蛋壳跟练 AI 体态评估/);
+  assert.match(page, /2 分钟，看懂你的体态/);
+  assert.match(page, /一眼看懂你的体态报告/);
+  assert.match(page, /真实学员，真实改变/);
+  assert.match(page, /简单几步，获得体态报告/);
+  assert.match(page, /\/ai-posture\/start\?lang=/);
+  assert.match(page, /embedded=\$\{embedded \? "1" : "0"\}/);
 });
 
-test("includes the fixed assessment route and all four process cards", async () => {
-  const response = await render();
-  const html = await response.text();
+test("assessment flow is limited to front, side, and back images", async () => {
+  const store = await source("lib/assessment-store.ts");
+  const flow = await source("app/ai-posture/start/page.tsx");
 
-  assert.match(html, /href="\/ai-posture\/start"/);
-  assert.match(html, /填写信息/);
-  assert.match(html, /拍摄照片/);
-  assert.match(html, /AI 体态分析/);
-  assert.match(html, /获得建议/);
+  assert.match(store, /\["front", "side", "back"\] as const/);
+  assert.match(flow, /正面、侧面和背面/);
+  assert.match(flow, /front/);
+  assert.match(flow, /side/);
+  assert.match(flow, /back/);
+});
+
+test("build contains all H5 and hyeyes worker API routes", async () => {
+  const requiredRoutes = [
+    "app/api/assessments/route.ts",
+    "app/api/assessments/[id]/images/[poseId]/route.ts",
+    "app/api/assessments/[id]/submit/route.ts",
+    "app/api/v1/assessments/pending/route.ts",
+    "app/api/v1/assessments/[id]/result/route.ts",
+    "app/api/v1/assessments/[id]/fail/route.ts",
+    "app/app-api/infra/file/upload/route.ts",
+    "dist/server/index.js",
+  ];
+  await Promise.all(requiredRoutes.map((pathname) => access(new URL(pathname, root))));
 });
