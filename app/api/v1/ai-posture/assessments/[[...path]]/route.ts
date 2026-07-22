@@ -10,30 +10,47 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { AUTH_COOKIE, DEVICE_COOKIE, isSameOriginRequest } from "@/lib/server-auth";
 
 const SYH_BACKEND = "https://api.shareyourhealth.cn";
 const SYH_MP_APP_ID = "wx67532ea818b427d6";
 const SYH_APP_ID = "HEALTH";
+const REQUEST_TIMEOUT_MS = 15_000;
+
+function isAllowedRoute(method: string, path: string[]): boolean {
+  if (method === "POST" && path.length === 0) return true;
+  if (!/^\d+$/.test(path[0] || "")) return false;
+  if (method === "GET" && path.length === 1) return true;
+  if (method !== "POST" || path.length !== 2) return false;
+  return new Set(["upload-credentials", "submit", "feedback"]).has(path[1]);
+}
 
 async function proxy(request: NextRequest, { params }: { params: Promise<{ path?: string[] }> }) {
   const { path = [] } = await params;
+  if (!isAllowedRoute(request.method, path)) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  if (request.method !== "GET" && !isSameOriginRequest(request)) {
+    return NextResponse.json({ error: "Cross-origin requests are not allowed" }, { status: 403 });
+  }
   const subPath = path.join("/");
   const search = request.nextUrl.search || "";
   const targetUrl = `${SYH_BACKEND}/api/v1/ai-posture/assessments${subPath ? `/${subPath}` : ""}${search}`;
 
   // 从浏览器请求头读取 token / deviceToken
-  const loginToken = request.headers.get("x-mp-logintoken") || "";
-  const deviceToken = request.headers.get("x-devicetoken") || "";
+  const loginToken = request.cookies.get(AUTH_COOKIE)?.value || "";
+  const deviceToken = request.cookies.get(DEVICE_COOKIE)?.value || request.headers.get("x-devicetoken") || "";
+  if (!loginToken) {
+    return NextResponse.json({ error: "Session expired" }, { status: 401 });
+  }
 
   // 显式构造后端要求的完整 header 四件套
   const headers = new Headers();
   headers.set("Content-Type", "application/json");
   headers.set("X-App-Id", SYH_APP_ID);
-  headers.set("X-Platform", request.headers.get("x-platform") || "iOS");
-  if (loginToken) {
-    headers.set("X-Mp-LoginToken", loginToken);
-    headers.set("X-Mp-AppId", SYH_MP_APP_ID);
-  }
+  headers.set("X-Platform", "web");
+  headers.set("X-Mp-LoginToken", loginToken);
+  headers.set("X-Mp-AppId", SYH_MP_APP_ID);
   if (deviceToken) {
     headers.set("X-DeviceToken", deviceToken);
   }
@@ -44,26 +61,30 @@ async function proxy(request: NextRequest, { params }: { params: Promise<{ path?
     body = await request.text();
   }
 
-  const backendResp = await fetch(targetUrl, {
-    method: request.method,
-    headers,
-    body,
-    // 禁用缓存，确保每次都打后端
-    cache: "no-store",
-  });
-
-  const respText = await backendResp.text();
-
-  return new NextResponse(respText, {
-    status: backendResp.status,
-    headers: {
-      "Content-Type": backendResp.headers.get("Content-Type") || "application/json",
-    },
-  });
+  try {
+    const backendResp = await fetch(targetUrl, {
+      method: request.method,
+      headers,
+      body,
+      cache: "no-store",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const respText = await backendResp.text();
+    return new NextResponse(respText, {
+      status: backendResp.status,
+      headers: {
+        "Cache-Control": "no-store",
+        "Content-Type": backendResp.headers.get("Content-Type") || "application/json",
+      },
+    });
+  } catch (error) {
+    const timedOut = error instanceof Error && error.name === "TimeoutError";
+    return NextResponse.json(
+      { error: timedOut ? "评估服务响应超时，请重试" : "评估服务暂时不可用，请重试" },
+      { status: timedOut ? 504 : 502 },
+    );
+  }
 }
 
 export const GET = proxy;
 export const POST = proxy;
-export const PUT = proxy;
-export const DELETE = proxy;
-export const PATCH = proxy;

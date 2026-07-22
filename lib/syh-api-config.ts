@@ -22,27 +22,26 @@ export const SYH_API_PATHS = {
   submitFeedback: (id: string) => `/api/v1/ai-posture/assessments/${id}/feedback`,
 };
 
-/**
- * 蛋壳跟练 iOS App 的微信开放平台 AppId
- * 来源：iOS 工程 WxManager.swift:16 WXManager.kAppKey，EGVMoyaPlugin.swift:20 设置 X-Mp-AppId
- * syh-server UserInterceptor 要求 X-Mp-LoginToken + X-Mp-AppId 同时存在才做登录校验
- */
-export const SYH_MP_APP_ID = "wx67532ea818b427d6";
-
-// X-App-Id 应用标识（HEALTH / FITNESS / YOUTH）
-export const SYH_APP_ID = "HEALTH";
+declare global {
+  interface Window {
+    syhAuthToken?: string;
+    syhDeviceToken?: string;
+  }
+}
 
 /**
  * 从 App 获取用户登录 token
  * 在 App 内嵌 H5 时，App 会通过 URL 参数或 JSBridge 传入 token
  */
-export function getAuthToken(): string {
+export function getLegacyAuthToken(includeUrl = false): string {
   if (typeof window === "undefined") return "";
 
-  // 方式 1：URL 参数
-  const params = new URLSearchParams(window.location.search);
-  const tokenFromUrl = params.get("auth_token") || params.get("token");
-  if (tokenFromUrl) return tokenFromUrl;
+  // URL token 仅供 App 内嵌页迁移到 HttpOnly Cookie；普通浏览器不读取。
+  if (includeUrl) {
+    const params = new URLSearchParams(window.location.search);
+    const tokenFromUrl = params.get("auth_token") || params.get("token");
+    if (tokenFromUrl) return tokenFromUrl;
+  }
 
   // 方式 2：localStorage（App 通过 JSBridge 写入）
   const tokenFromStorage = localStorage.getItem("syh_auth_token");
@@ -53,7 +52,7 @@ export function getAuthToken(): string {
   if (tokenFromH5) return tokenFromH5;
 
   // 方式 4：从 window 全局变量（App 注入）
-  if ((window as any).syhAuthToken) return (window as any).syhAuthToken;
+  if (window.syhAuthToken) return window.syhAuthToken;
 
   return "";
 }
@@ -62,13 +61,15 @@ export function getAuthToken(): string {
  * 从 App 获取设备 token（iOS 设备唯一标识，大写 UUID）
  * 与 token 配对使用，来源 EGVAppInfo.share.deviceId
  */
-export function getDeviceToken(): string {
+export function getDeviceToken(includeUrl = false): string {
   if (typeof window === "undefined") return "";
 
-  // 方式 1：URL 参数
-  const params = new URLSearchParams(window.location.search);
-  const fromUrl = params.get("device_token") || params.get("deviceToken");
-  if (fromUrl) return fromUrl;
+  // URL 参数仅供 App 内嵌页迁移，普通浏览器不读取。
+  if (includeUrl) {
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get("device_token") || params.get("deviceToken");
+    if (fromUrl) return fromUrl;
+  }
 
   // 方式 2：localStorage
   const fromStorage = localStorage.getItem("syh_device_token");
@@ -79,7 +80,7 @@ export function getDeviceToken(): string {
   if (fromH5) return fromH5;
 
   // 方式 4：window 全局变量
-  if ((window as any).syhDeviceToken) return (window as any).syhDeviceToken;
+  if (window.syhDeviceToken) return window.syhDeviceToken;
 
   return "";
 }

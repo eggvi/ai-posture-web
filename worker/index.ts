@@ -3,10 +3,9 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 
 interface Env {
-  ASSETS: Fetcher;
-  DB: D1Database;
-  UPLOADS: R2Bucket;
-  HYEYES_WORKER_TOKEN?: string;
+  ASSETS: {
+    fetch(request: Request): Promise<Response>;
+  };
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -21,6 +20,29 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
+function withSecurityHeaders(request: Request, response: Response): Response {
+  const secured = new Response(response.body, response);
+  secured.headers.set("Content-Security-Policy", [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "connect-src 'self' https://api.shareyourhealth.cn https://*.qiniup.com",
+    "form-action 'self'",
+    "frame-ancestors 'self'",
+    "img-src 'self' blob: data: https:",
+    "object-src 'none'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+  ].join("; "));
+  secured.headers.set("Permissions-Policy", "camera=(self), geolocation=(), microphone=()");
+  secured.headers.set("Referrer-Policy", "no-referrer");
+  secured.headers.set("X-Content-Type-Options", "nosniff");
+  secured.headers.set("X-Frame-Options", "SAMEORIGIN");
+  if (new URL(request.url).protocol === "https:") {
+    secured.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+  return secured;
+}
+
 // Image security config. SVG sources with .svg extension auto-skip the
 // optimization endpoint on the client side (served directly, no proxy).
 // To route SVGs through the optimizer (with security headers), set
@@ -30,19 +52,25 @@ interface ExecutionContext {
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    const isLocalHost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+    if (url.protocol === "http:" && !isLocalHost) {
+      url.protocol = "https:";
+      return Response.redirect(url, 308);
+    }
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
-      return handleImageOptimization(request, {
+      const response = await handleImageOptimization(request, {
         fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
         transformImage: async (body, { width, format, quality }) => {
           const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
           return result.response();
         },
       }, allowedWidths);
+      return withSecurityHeaders(request, response);
     }
 
-    return handler.fetch(request, env, ctx);
+    return withSecurityHeaders(request, await handler.fetch(request, env, ctx));
   },
 };
 

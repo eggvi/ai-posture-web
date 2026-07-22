@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type Language = "zh" | "en";
@@ -98,24 +100,24 @@ const content = {
 } as const;
 
 const aiImages = [
-  "/images/ai/front.jpg",
-  "/images/ai/side.jpg",
-  "/images/ai/back.jpg",
+  "/images/ai/front.webp",
+  "/images/ai/side.webp",
+  "/images/ai/back.webp",
 ];
 
 const caseImages = [
-  "/images/cases/case-15-days.jpg",
-  "/images/cases/case-one-month.jpg",
-  "/images/cases/case-two-weeks-a.jpg",
-  "/images/cases/case-two-weeks-b.jpg",
-  "/images/cases/case-four-weeks.jpg",
+  "/images/cases/case-15-days.webp",
+  "/images/cases/case-one-month.webp",
+  "/images/cases/case-two-weeks-a.webp",
+  "/images/cases/case-two-weeks-b.webp",
+  "/images/cases/case-four-weeks.webp",
 ];
 
 const processImages = [
-  "/images/process/step-01.jpg",
-  "/images/process/step-02.jpg",
-  "/images/process/step-03.jpg",
-  "/images/process/step-04.jpg",
+  "/images/process/step-01.webp",
+  "/images/process/step-02.webp",
+  "/images/process/step-03.webp",
+  "/images/process/step-04.webp",
 ];
 
 const stepColors = ["#FFC95F", "#FF846F", "#44D5C6", "#9BE4F2"];
@@ -146,8 +148,10 @@ function ScrollButtons({
 export default function Home() {
   const [language, setLanguage] = useState<Language>("zh");
   const [embedded, setEmbedded] = useState(false);
+  const [showFloatingCta, setShowFloatingCta] = useState(false);
   const resultRef = useRef<HTMLDivElement>(null);
   const caseRef = useRef<HTMLDivElement>(null);
+  const heroCtaRef = useRef<HTMLAnchorElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,16 +163,29 @@ export default function Home() {
 
       if (requestedLanguage?.startsWith("en")) {
         setLanguage("en");
+        document.documentElement.lang = "en";
       } else if (requestedLanguage?.startsWith("zh")) {
         setLanguage("zh");
+        document.documentElement.lang = "zh-CN";
       } else if (navigator.language.toLowerCase().startsWith("en")) {
         setLanguage("en");
+        document.documentElement.lang = "en";
       }
     });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const target = heroCtaRef.current;
+    if (!target || embedded || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => {
+      setShowFloatingCta(!entry.isIntersecting && entry.boundingClientRect.bottom < 0);
+    }, { threshold: 0.2 });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [embedded]);
 
   const t = content[language];
   const pageClass = useMemo(
@@ -188,7 +205,14 @@ export default function Home() {
   };
 
   const switchLanguage = () => {
-    setLanguage((current) => (current === "zh" ? "en" : "zh"));
+    setLanguage((current) => {
+      const next = current === "zh" ? "en" : "zh";
+      const params = new URLSearchParams(window.location.search);
+      params.set("lang", next === "zh" ? "zh-CN" : "en");
+      window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}${window.location.hash}`);
+      document.documentElement.lang = next === "zh" ? "zh-CN" : "en";
+      return next;
+    });
   };
 
   return (
@@ -196,7 +220,7 @@ export default function Home() {
       {!embedded && (
         <header className="site-header">
           <a className="brand" href="#top" aria-label={t.brand}>
-            <img src="/images/brand/logo.jpg" alt="" />
+            <img src="/images/brand/logo.jpg" alt="" width="256" height="256" decoding="async" />
             <span>{t.brand}</span>
           </a>
           <nav aria-label="Primary navigation">
@@ -221,12 +245,17 @@ export default function Home() {
                 <li key={chip}>{chip}</li>
               ))}
             </ul>
-            <a className="text-link" href="#results">
-              {t.navResults} <span aria-hidden="true">↓</span>
-            </a>
+            {!embedded ? (
+              <div className="hero-actions">
+                <a className="hero-cta" href={ctaHref} ref={heroCtaRef}>{t.cta}<span aria-hidden="true">→</span></a>
+                <span>{t.ctaNote}</span>
+              </div>
+            ) : (
+              <a className="text-link" href="#results">{t.navResults} <span aria-hidden="true">↓</span></a>
+            )}
           </div>
           <figure className="hero-visual">
-            <img src="/images/ai/front.jpg" alt={t.heroCaption} />
+            <img src="/images/ai/front.webp" alt={t.heroCaption} width="1050" height="1400" fetchPriority="high" />
             <figcaption>
               <span className="scan-dot" aria-hidden="true" />
               {t.heroCaption}
@@ -255,7 +284,7 @@ export default function Home() {
                   <span>{String(index + 1).padStart(2, "0")}</span>
                   {t.resultLabels[index]}
                 </div>
-                <img src={src} alt={t.resultLabels[index]} loading={index === 0 ? "eager" : "lazy"} />
+                <img src={src} alt={t.resultLabels[index]} width="1050" height="1400" loading={index === 0 ? "eager" : "lazy"} decoding="async" />
               </article>
             ))}
           </div>
@@ -282,7 +311,7 @@ export default function Home() {
             {caseImages.map((src, index) => (
               <article className="case-card" key={src}>
                 <div className="case-image-wrap">
-                  <img src={src} alt={`${t.casePeriods[index]} ${t.caseTags[index]}`} loading="lazy" />
+                  <img src={src} alt={`${t.casePeriods[index]} ${t.caseTags[index]}`} width="900" height="1200" loading="lazy" decoding="async" />
                   <span className="period-tag">{t.casePeriods[index]}</span>
                 </div>
                 <div className="case-copy">
@@ -303,7 +332,7 @@ export default function Home() {
           <div className="process-grid">
             {processImages.map((src, index) => (
               <article className="process-card" key={src}>
-                <img src={src} alt="" loading="lazy" />
+                <img src={src} alt="" width="900" height="900" loading="lazy" decoding="async" />
                 <span className="step-number" style={{ backgroundColor: stepColors[index] }}>
                   {String(index + 1).padStart(2, "0")}
                 </span>
@@ -325,15 +354,15 @@ export default function Home() {
 
       <footer>
         <div className="brand footer-brand">
-          <img src="/images/brand/logo.jpg" alt="" />
+          <img src="/images/brand/logo.jpg" alt="" width="256" height="256" loading="lazy" decoding="async" />
           <span>{t.brand}</span>
         </div>
         <p>{t.footer}</p>
       </footer>
 
       {!embedded && (
-        <div className="sticky-cta" role="region" aria-label={t.cta}>
-          <a href={ctaHref}>{t.cta}</a>
+        <div className={`sticky-cta ${showFloatingCta ? "is-visible" : ""}`} role="region" aria-label={t.cta} aria-hidden={!showFloatingCta}>
+          <a href={ctaHref} tabIndex={showFloatingCta ? 0 : -1}>{t.cta}<span aria-hidden="true">→</span></a>
           <span>{t.ctaNote}</span>
         </div>
       )}

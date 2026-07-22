@@ -3,22 +3,9 @@
  * API contract 来自 AIPostureAssessmentApi.java
  */
 
-import { SYH_API_PATHS, getAuthToken, getDeviceToken, SYH_MP_APP_ID, SYH_APP_ID } from "./syh-api-config";
+import { SYH_API_PATHS, getDeviceToken } from "./syh-api-config";
 
 // ============ 后端实际请求体 ============
-
-export type ProfileInput = {
-  nickname: string;
-  age: number;
-  height: number;
-  weight: number;
-  occupation?: string;
-  goal: string;
-  painArea?: string;
-  painLevel?: string;
-};
-
-export type AssessmentId = string | number; // Long on backend, string on frontend
 
 // POST /{assessmentId}/upload-credentials body: { poseType: "FRONT"|"SIDE"|"BACK" }
 // 返回: { poseType, token, key, bucket, uploadUrl }
@@ -55,7 +42,7 @@ export type AssessmentDetail = {
     originalUrl: string;
     annotatedUrl: string;
   }>;
-  reportData: any | null;
+  reportData: unknown | null;
   engineVersion: string | null;
   errorType: string | null;
   errorMessage: string | null;
@@ -67,21 +54,38 @@ export type AssessmentDetail = {
 
 // ============ HTTP 客户端 ============
 
-async function fetchWithAuth(url: string, options: RequestInit = {}) {
-  const token = getAuthToken();
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
+}
+
+function parseAssessmentDetail(value: unknown): AssessmentDetail {
+  if (!isRecord(value) || typeof value.id !== "number" || typeof value.status !== "string" || !Array.isArray(value.images)) {
+    throw new ApiError("评估服务返回了无法识别的数据", 502);
+  }
+  return value as AssessmentDetail;
+}
+
+async function clearExpiredSession() {
+  if (typeof window === "undefined") return;
+  for (const key of ["syh_auth_token", "ai_posture_token"]) localStorage.removeItem(key);
+  await fetch("/api/auth/session", { method: "DELETE" }).catch(() => undefined);
+}
+
+async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<unknown> {
   const deviceToken = getDeviceToken();
   const headers = new Headers(options.headers);
 
-  // syh-server UserInterceptor 要求 X-Mp-* 四件套，缺 X-Mp-AppId 会跳过登录校验导致 403
-  if (token) {
-    headers.set("X-Mp-LoginToken", token);
-    headers.set("X-Mp-AppId", SYH_MP_APP_ID);
-  }
   if (deviceToken) {
     headers.set("X-DeviceToken", deviceToken);
   }
-  headers.set("X-App-Id", SYH_APP_ID);
-  headers.set("X-Platform", "iOS");
+  headers.set("X-Platform", "web");
 
   if (!headers.has("Content-Type") && options.body && typeof options.body === "string") {
     headers.set("Content-Type", "application/json");
@@ -89,15 +93,19 @@ async function fetchWithAuth(url: string, options: RequestInit = {}) {
 
   const response = await fetch(url, {
     ...options,
+    credentials: "same-origin",
     headers,
+    signal: options.signal || AbortSignal.timeout(15_000),
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ errMsg: `HTTP ${response.status}` }));
-    throw new Error(error.errMsg || error.error || `Request failed: ${response.status}`);
+    const error = await response.json().catch(() => null) as Record<string, unknown> | null;
+    if (response.status === 401) await clearExpiredSession();
+    const message = [error?.errMsg, error?.error, error?.message].find((value) => typeof value === "string");
+    throw new ApiError(typeof message === "string" ? message : `Request failed: ${response.status}`, response.status);
   }
 
-  return response.json();
+  return response.json() as Promise<unknown>;
 }
 
 // ============ API 方法 ============
@@ -107,9 +115,9 @@ export const syhApi = {
    * 创建评估（无 body，后端 createOrResume 用 getUserId()）
    */
   async createAssessment(): Promise<AssessmentDetail> {
-    return fetchWithAuth(SYH_API_PATHS.createAssessment(), {
+    return parseAssessmentDetail(await fetchWithAuth(SYH_API_PATHS.createAssessment(), {
       method: "POST",
-    });
+    }));
   },
 
   /**
@@ -117,28 +125,35 @@ export const syhApi = {
    * poseType: "FRONT" | "SIDE" | "BACK"
    */
   async getUploadCredential(assessmentId: string, poseType: string): Promise<UploadCredential> {
-    return fetchWithAuth(SYH_API_PATHS.getUploadCredentials(assessmentId), {
+    const value = await fetchWithAuth(SYH_API_PATHS.getUploadCredentials(assessmentId), {
       method: "POST",
       body: JSON.stringify({ poseType: poseType.toUpperCase() }),
     });
+    if (!isRecord(value) || typeof value.token !== "string" || typeof value.key !== "string" || typeof value.uploadUrl !== "string") {
+      throw new ApiError("上传服务返回了无法识别的数据", 502);
+    }
+    return value as UploadCredential;
   },
 
   /**
    * 直传图片到七牛（使用 credential 中的 uploadUrl + token + key）
    */
   async uploadToQiniu(credential: UploadCredential, file: File): Promise<void> {
+    const uploadUrl = new URL(credential.uploadUrl);
+    if (uploadUrl.protocol !== "https:") throw new ApiError("图片上传地址不是安全连接", 502);
     const formData = new FormData();
     formData.append("token", credential.token);
     formData.append("key", credential.key);
     formData.append("file", file);
 
-    const response = await fetch(credential.uploadUrl, {
+    const response = await fetch(uploadUrl, {
       method: "POST",
       body: formData,
+      signal: AbortSignal.timeout(60_000),
     });
 
     if (!response.ok) {
-      throw new Error(`Upload failed: ${response.status}`);
+      throw new ApiError(`Upload failed: ${response.status}`, response.status);
     }
   },
 
@@ -146,26 +161,26 @@ export const syhApi = {
    * 提交评估（需要年龄/身高/体重/目标 + 三张照片的 key）
    */
   async submitAssessment(assessmentId: string, input: SubmitInput): Promise<AssessmentDetail> {
-    return fetchWithAuth(SYH_API_PATHS.submitAssessment(assessmentId), {
+    return parseAssessmentDetail(await fetchWithAuth(SYH_API_PATHS.submitAssessment(assessmentId), {
       method: "POST",
       body: JSON.stringify(input),
-    });
+    }));
   },
 
   /**
    * 查询评估状态和报告
    */
   async getAssessment(assessmentId: string): Promise<AssessmentDetail> {
-    return fetchWithAuth(SYH_API_PATHS.getAssessment(assessmentId));
+    return parseAssessmentDetail(await fetchWithAuth(SYH_API_PATHS.getAssessment(assessmentId)));
   },
 
   /**
    * 提交反馈评分
    */
   async submitFeedback(assessmentId: string, rating: number, comment?: string): Promise<AssessmentDetail> {
-    return fetchWithAuth(SYH_API_PATHS.submitFeedback(assessmentId), {
+    return parseAssessmentDetail(await fetchWithAuth(SYH_API_PATHS.submitFeedback(assessmentId), {
       method: "POST",
       body: JSON.stringify({ rating, comment }),
-    });
+    }));
   },
 };

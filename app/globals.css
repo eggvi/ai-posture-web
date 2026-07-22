@@ -166,7 +166,7 @@ p {
   overflow-wrap: anywhere;
 }
 
-h1 {
+.hero h1 {
   max-width: 700px;
   margin: 0;
   font-size: clamp(48px, 5.3vw, 76px);
@@ -200,6 +200,46 @@ h1 {
   color: #08766b;
   font-size: 14px;
   font-weight: 720;
+}
+
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.hero-actions > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.hero-cta {
+  display: inline-flex;
+  min-width: 220px;
+  min-height: 58px;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 0 28px;
+  border-radius: 19px;
+  background: var(--mint);
+  color: #123c38;
+  box-shadow: 0 14px 30px rgba(33, 220, 198, 0.28);
+  font-size: 17px;
+  font-weight: 880;
+  transition: background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.hero-cta:hover,
+.hero-cta:focus-visible {
+  background: #30e3ce;
+  box-shadow: 0 16px 34px rgba(33, 220, 198, 0.34);
+  transform: translateY(-1px);
+}
+
+.hero-cta:active {
+  transform: translateY(1px);
 }
 
 .text-link {
@@ -267,6 +307,14 @@ h1 {
 
 .section {
   padding-block: 108px;
+}
+
+#results,
+#cases,
+#steps,
+.trust-section {
+  content-visibility: auto;
+  contain-intrinsic-size: 900px;
 }
 
 .section-mint,
@@ -610,32 +658,48 @@ footer {
   right: 50%;
   bottom: 18px;
   display: grid;
-  width: min(520px, calc(100vw - 32px));
-  min-height: 74px;
-  padding: 8px 10px 7px;
-  transform: translateX(50%);
+  width: min(640px, calc(100vw - 32px));
+  min-height: 82px;
+  padding: 9px 10px 8px;
+  transform: translate(50%, calc(100% + 40px));
   place-items: center;
   border: 1px solid rgba(255, 255, 255, 0.68);
   border-radius: 26px;
   background: rgba(255, 255, 255, 0.88);
   box-shadow: 0 18px 54px rgba(45, 44, 56, 0.22);
   backdrop-filter: blur(18px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease, transform 220ms ease;
+  will-change: opacity, transform;
+}
+
+.sticky-cta.is-visible {
+  transform: translate(50%, 0);
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .sticky-cta a {
-  display: grid;
+  display: flex;
   width: 100%;
-  min-height: 48px;
-  place-items: center;
+  min-height: 58px;
+  align-items: center;
+  justify-content: center;
   border-radius: 18px;
   background: var(--mint);
   color: #143a36;
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 880;
   box-shadow: 0 10px 22px rgba(33, 220, 198, 0.25);
 }
 
-.sticky-cta span {
+.sticky-cta a span {
+  margin-left: 14px;
+  font-size: 20px;
+}
+
+.sticky-cta > span {
   margin-top: 4px;
   color: var(--muted);
   font-size: 11px;
@@ -722,7 +786,7 @@ footer {
     padding-block: 44px 64px;
   }
 
-  h1 {
+  .hero h1 {
     font-size: clamp(42px, 12.8vw, 54px);
     line-height: 1.08;
   }
@@ -741,6 +805,20 @@ footer {
   .hero-chips li {
     padding: 8px 11px;
     font-size: 12px;
+  }
+
+  .hero-actions {
+    display: grid;
+    gap: 10px;
+  }
+
+  .hero-actions > span {
+    text-align: center;
+  }
+
+  .hero-cta {
+    width: 100%;
+    min-height: 60px;
   }
 
   .hero-visual::before {
@@ -911,9 +989,31 @@ footer {
   .sticky-cta {
     bottom: max(10px, env(safe-area-inset-bottom));
     width: calc(100vw - 20px);
-    min-height: 70px;
+    min-height: 80px;
     border-radius: 23px;
   }
+}
+
+.login-title {
+  max-width: none;
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.4;
+}
+
+.login-legal {
+  line-height: 1.7;
+}
+
+.login-legal a,
+.consent-row a {
+  color: var(--mint-deep);
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
 }
 
 /* AI assessment flow */
@@ -1176,6 +1276,18 @@ footer {
   font-weight: 700;
 }
 
+.flow-secondary {
+  min-height: 46px;
+  margin-top: 16px;
+  padding: 0 20px;
+  border: 1px solid #c8f4ee;
+  border-radius: 14px;
+  background: var(--mint-soft);
+  color: var(--mint-deep);
+  cursor: pointer;
+  font-weight: 780;
+}
+
 .photo-upload-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1275,6 +1387,11 @@ footer {
   opacity: 0;
 }
 
+.photo-picker.is-disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
 .flow-privacy,
 .report-actions p {
   margin: 16px 0 0;
@@ -1288,6 +1405,10 @@ footer {
   max-width: 680px;
   padding-block: 70px;
   text-align: center;
+}
+
+.flow-session-loading {
+  min-height: 340px;
 }
 
 .analysis-orbit {
