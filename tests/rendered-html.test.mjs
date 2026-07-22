@@ -66,5 +66,5 @@ test("build contains the H5 routes and the syh-server proxy contract", async () 
   assert.match(dockerfile, /COPY --from=builder \/app\/dist \.\/dist/);
   assert.match(dockerfile, /ENV ENFORCE_HTTPS=false/);
   assert.doesNotMatch(dockerfile, /dist\/standalone/);
-  assert.match(worker, /env\.ENFORCE_HTTPS !== "false"/);
+  assert.match(worker, /const enforceHttps = env \? env\.ENFORCE_HTTPS !== "false" : false/);
 });

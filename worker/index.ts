@@ -54,7 +54,8 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const isLocalHost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
-    if (url.protocol === "http:" && !isLocalHost && env.ENFORCE_HTTPS !== "false") {
+    const enforceHttps = env ? env.ENFORCE_HTTPS !== "false" : false;
+    if (url.protocol === "http:" && !isLocalHost && enforceHttps) {
       url.protocol = "https:";
       return Response.redirect(url, 308);
     }
