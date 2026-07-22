@@ -3,6 +3,7 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 
 interface Env {
+  ENFORCE_HTTPS?: string;
   ASSETS: {
     fetch(request: Request): Promise<Response>;
   };
@@ -53,7 +54,7 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const isLocalHost = url.hostname === "localhost" || url.hostname === "127.0.0.1";
-    if (url.protocol === "http:" && !isLocalHost) {
+    if (url.protocol === "http:" && !isLocalHost && env.ENFORCE_HTTPS !== "false") {
       url.protocol = "https:";
       return Response.redirect(url, 308);
     }

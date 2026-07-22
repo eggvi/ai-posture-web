@@ -17,6 +17,7 @@ COPY server.mjs ./server.mjs
 # 环境变量
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV ENFORCE_HTTPS=false
 
 EXPOSE 3000
 
