@@ -1306,6 +1306,15 @@ footer {
   border-color: #7de7da;
 }
 
+.photo-upload-card.is-uploading {
+  border-color: #45cdbd;
+  box-shadow: 0 0 0 3px rgba(69, 205, 189, 0.12);
+}
+
+.photo-upload-card.is-error {
+  border-color: #ef9c91;
+}
+
 .photo-preview {
   position: relative;
   aspect-ratio: 3 / 4;
@@ -1344,6 +1353,32 @@ footer {
   box-shadow: 0 6px 16px rgba(45, 44, 56, 0.14);
 }
 
+.upload-status {
+  position: absolute;
+  inset: auto 10px 10px 10px;
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(20, 37, 40, 0.9);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 820;
+  box-shadow: 0 8px 22px rgba(20, 37, 40, 0.2);
+}
+
+.upload-status i {
+  width: 15px;
+  height: 15px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: upload-spin 0.8s linear infinite;
+}
+
 .photo-card-copy {
   min-height: 122px;
   padding: 16px 16px 8px;
@@ -1379,6 +1414,11 @@ footer {
   color: var(--mint-deep);
 }
 
+.photo-upload-card.is-error .photo-picker {
+  background: #fff0ed;
+  color: #ad4033;
+}
+
 .photo-picker input {
   position: absolute;
   width: 1px;
@@ -1389,7 +1429,11 @@ footer {
 
 .photo-picker.is-disabled {
   cursor: wait;
-  opacity: 0.5;
+  opacity: 0.78;
+}
+
+@keyframes upload-spin {
+  to { transform: rotate(360deg); }
 }
 
 .flow-privacy,

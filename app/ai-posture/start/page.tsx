@@ -8,6 +8,7 @@ import { getDeviceToken, getLegacyAuthToken } from "@/lib/syh-api-config";
 
 type Language = "zh" | "en";
 type PoseId = "front" | "side" | "back";
+type UploadPhase = "idle" | "optimizing" | "uploading" | "uploaded" | "error";
 type ProfileState = {
   age: string;
   height: string;
@@ -96,10 +97,11 @@ const copy = {
     choosePhoto: "拍摄或选择照片",
     replacePhoto: "重新选择",
     uploaded: "已上传",
-    uploading: "上传中…",
+    uploading: "正在上传中…",
+    uploadFailed: "上传失败，请重试",
     submit: "确认三张照片并开始分析",
     processingTitle: "正在分析你的体态",
-    processingBody: "AI 正在识别关节点、计算角度并生成标注图。通常需要 1–3 分钟，请保留此页面。",
+    processingBody: "AI 正在识别关节点、计算角度并生成标注图。通常约需 30–90 秒，请保留此页面。",
     submitted: "照片已安全上传",
     queued: "等待算法任务",
     running: "识别关节点与身体对位",
@@ -154,9 +156,10 @@ const copy = {
     replacePhoto: "Replace",
     uploaded: "Uploaded",
     uploading: "Uploading…",
+    uploadFailed: "Upload failed. Try again",
     submit: "Confirm photos and start analysis",
     processingTitle: "Analyzing your posture",
-    processingBody: "AI is detecting joints, measuring angles, and producing annotated views. This usually takes 1–3 minutes.",
+    processingBody: "AI is detecting joints, measuring angles, and producing annotated views. This usually takes about 30–90 seconds.",
     submitted: "Photos uploaded securely",
     queued: "Waiting for the analysis worker",
     running: "Detecting joints and alignment",
@@ -246,31 +249,61 @@ async function optimizePhoto(file: File): Promise<File> {
   const isWebp = String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP";
   if (!isJpeg && !isPng && !isWebp) throw new Error("Unsupported image data");
 
-  if (typeof createImageBitmap !== "function") return file;
-  const bitmap = await createImageBitmap(file);
-  const longestEdge = Math.max(bitmap.width, bitmap.height);
-  if (longestEdge < 1800 && file.size < 2 * 1024 * 1024) {
-    bitmap.close();
+  let source: CanvasImageSource;
+  let sourceWidth: number;
+  let sourceHeight: number;
+  let cleanup = () => {};
+
+  if (typeof createImageBitmap === "function") {
+    const bitmap = await createImageBitmap(file);
+    source = bitmap;
+    sourceWidth = bitmap.width;
+    sourceHeight = bitmap.height;
+    cleanup = () => bitmap.close();
+  } else {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.decoding = "async";
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("Unsupported image data"));
+      image.src = objectUrl;
+    }).catch((reason) => {
+      URL.revokeObjectURL(objectUrl);
+      throw reason;
+    });
+    source = image;
+    sourceWidth = image.naturalWidth;
+    sourceHeight = image.naturalHeight;
+    cleanup = () => URL.revokeObjectURL(objectUrl);
+  }
+
+  const longestEdge = Math.max(sourceWidth, sourceHeight);
+  if (longestEdge <= 1600 && file.size <= 900 * 1024) {
+    cleanup();
     return file;
   }
 
-  const scale = Math.min(1, 1800 / longestEdge);
-  const width = Math.max(1, Math.round(bitmap.width * scale));
-  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const scale = Math.min(1, 1600 / longestEdge);
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext("2d");
   if (!context) {
-    bitmap.close();
+    cleanup();
     return file;
   }
   context.fillStyle = "#fff";
   context.fillRect(0, 0, width, height);
-  context.drawImage(bitmap, 0, 0, width, height);
-  bitmap.close();
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
+  context.drawImage(source, 0, 0, width, height);
+  cleanup();
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+  canvas.width = 1;
+  canvas.height = 1;
   if (!blob) return file;
+  if (scale === 1 && blob.size >= file.size) return file;
   const basename = file.name.replace(/\.[^.]+$/, "") || "posture-photo";
   return new File([blob], `${basename}.jpg`, { type: "image/jpeg", lastModified: Date.now() });
 }
@@ -284,18 +317,25 @@ export default function AssessmentStartPage() {
   const [consent, setConsent] = useState(false);
   const [assessmentId, setAssessmentId] = useState("");
   const [previews, setPreviews] = useState<Partial<Record<PoseId, string>>>({});
-  const [uploaded, setUploaded] = useState<Partial<Record<PoseId, boolean>>>({});
+  const [uploadPhases, setUploadPhases] = useState<Partial<Record<PoseId, UploadPhase>>>({});
   const [imageKeys, setImageKeys] = useState<Partial<Record<PoseId, string>>>({});
-  const [uploading, setUploading] = useState<PoseId | null>(null);
   const [payload, setPayload] = useState<AssessmentPayload | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [activePose, setActivePose] = useState("front");
   const [pollRevision, setPollRevision] = useState(0);
   const previewUrls = useRef(new Set<string>());
+  const imageKeysRef = useRef<Partial<Record<PoseId, string>>>({});
+  const uploadRunRef = useRef<Partial<Record<PoseId, number>>>({});
 
   const t = copy[language];
-  const allUploaded = poseIds.every((poseId) => uploaded[poseId]);
+  const allUploaded = poseIds.every((poseId) => uploadPhases[poseId] === "uploaded");
+  const anyUploading = poseIds.some((poseId) => uploadPhases[poseId] === "optimizing" || uploadPhases[poseId] === "uploading");
+
+  const replaceImageKeys = useCallback((nextKeys: Partial<Record<PoseId, string>>) => {
+    imageKeysRef.current = nextKeys;
+    setImageKeys(nextKeys);
+  }, []);
 
   /** 将后端 AIPostureAssessmentRes 转为前端 AssessmentPayload */
   const apiToPayload = useCallback((data: AssessmentDetail): AssessmentPayload => {
@@ -332,12 +372,12 @@ export default function AssessmentStartPage() {
       if (draft) {
         setProfile(draft.profile);
         setConsent(true);
-        setImageKeys(draft.imageKeys);
-        setUploaded(Object.fromEntries(next.uploads.map((item) => [item.poseId, Boolean(draft.imageKeys[item.poseId])])));
+        replaceImageKeys(draft.imageKeys);
+        setUploadPhases(Object.fromEntries(next.uploads.map((item) => [item.poseId, draft.imageKeys[item.poseId] ? "uploaded" : "idle"])));
         setStage(2);
       } else {
-        setImageKeys({});
-        setUploaded({});
+        replaceImageKeys({});
+        setUploadPhases({});
         setStage(1);
         const resolvedLanguage = messageLanguage || (document.documentElement.lang.startsWith("en") ? "en" : "zh");
         setError(copy[resolvedLanguage].draftMissing);
@@ -347,7 +387,7 @@ export default function AssessmentStartPage() {
       setStage(3);
     }
     return next;
-  }, [apiToPayload]);
+  }, [apiToPayload, replaceImageKeys]);
 
   const redirectToLogin = useCallback(() => {
     const params = new URLSearchParams(window.location.search);
@@ -458,7 +498,10 @@ export default function AssessmentStartPage() {
         const next = await loadAssessment(assessmentId);
         failures = 0;
         setError("");
-        if (next.status !== "SUCCEEDED" && next.status !== "FAILED") schedule(4000);
+        if (next.status !== "SUCCEEDED" && next.status !== "FAILED") {
+          const elapsed = Date.now() - startedAt;
+          schedule(elapsed < 60_000 ? (next.status === "PROCESSING" ? 1500 : 2000) : 4000);
+        }
       } catch (reason) {
         if (reason instanceof ApiError && reason.status === 401) {
           redirectToLogin();
@@ -479,7 +522,7 @@ export default function AssessmentStartPage() {
       }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
-    schedule(4000);
+    schedule(1000);
     return () => {
       stopped = true;
       if (timer) window.clearTimeout(timer);
@@ -521,15 +564,24 @@ export default function AssessmentStartPage() {
   };
 
   const uploadPhoto = async (poseId: PoseId, file?: File) => {
-    if (!file || !assessmentId || uploading) return;
+    if (!file || !assessmentId) return;
+    const currentPhase = uploadPhases[poseId];
+    if (currentPhase === "optimizing" || currentPhase === "uploading") return;
     setError("");
     if (!file.type.match(/^image\/(jpeg|png|webp)$/) || file.size > 12 * 1024 * 1024) {
       setError(language === "zh" ? "请上传 12MB 以内的 JPG、PNG 或 WebP 照片" : "Upload a JPG, PNG, or WebP photo under 12MB");
       return;
     }
-    setUploading(poseId);
+    const runId = (uploadRunRef.current[poseId] || 0) + 1;
+    uploadRunRef.current[poseId] = runId;
+    const keysWithoutPose = { ...imageKeysRef.current };
+    delete keysWithoutPose[poseId];
+    replaceImageKeys(keysWithoutPose);
+    writeDraft(assessmentId, { profile, imageKeys: keysWithoutPose });
+    setUploadPhases((current) => ({ ...current, [poseId]: "optimizing" }));
     try {
       const optimizedFile = await optimizePhoto(file);
+      if (uploadRunRef.current[poseId] !== runId) return;
       const preview = URL.createObjectURL(optimizedFile);
       previewUrls.current.add(preview);
       setPreviews((current) => {
@@ -540,27 +592,27 @@ export default function AssessmentStartPage() {
         }
         return { ...current, [poseId]: preview };
       });
-      setUploaded((current) => ({ ...current, [poseId]: false }));
+      setUploadPhases((current) => ({ ...current, [poseId]: "uploading" }));
       const credential = await syhApi.getUploadCredential(assessmentId, BACKEND_POSE[poseId]);
       await syhApi.uploadToQiniu(credential, optimizedFile);
-      const nextKeys = { ...imageKeys, [poseId]: credential.key };
-      setImageKeys(nextKeys);
+      if (uploadRunRef.current[poseId] !== runId) return;
+      const nextKeys = { ...imageKeysRef.current, [poseId]: credential.key };
+      replaceImageKeys(nextKeys);
       writeDraft(assessmentId, { profile, imageKeys: nextKeys });
-      setUploaded((current) => ({ ...current, [poseId]: true }));
+      setUploadPhases((current) => ({ ...current, [poseId]: "uploaded" }));
     } catch (reason) {
-      setUploaded((current) => ({ ...current, [poseId]: false }));
+      if (uploadRunRef.current[poseId] !== runId) return;
+      setUploadPhases((current) => ({ ...current, [poseId]: "error" }));
       if (requestError(reason) === "Unsupported image data") {
         setError(language === "zh" ? "照片内容无法识别，请重新选择 JPG、PNG 或 WebP 图片" : "The photo data is invalid. Choose a JPG, PNG, or WebP image.");
       } else {
         handleRequestError(reason);
       }
-    } finally {
-      setUploading(null);
     }
   };
 
   const submitAssessment = async () => {
-    if (!allUploaded || busy) return;
+    if (!allUploaded || busy || anyUploading) return;
     const frontKey = imageKeys.front;
     const sideKey = imageKeys.side;
     const backKey = imageKeys.back;
@@ -656,23 +708,38 @@ export default function AssessmentStartPage() {
               <div><h2>{t.photoTitle}</h2><p>{t.photoBody}</p></div>
             </div>
             <div className="photo-upload-grid">
-              {poseIds.map((poseId) => (
-                <article className={`photo-upload-card ${uploaded[poseId] ? "is-complete" : ""}`} key={poseId}>
+              {poseIds.map((poseId) => {
+                const phase = uploadPhases[poseId] || "idle";
+                const isWorking = phase === "optimizing" || phase === "uploading";
+                const isUploaded = phase === "uploaded";
+                const pickerText = phase === "optimizing"
+                  ? t.preparingPhoto
+                  : phase === "uploading"
+                    ? t.uploading
+                    : phase === "error"
+                      ? t.uploadFailed
+                      : isUploaded
+                        ? t.replacePhoto
+                        : t.choosePhoto;
+                return (
+                <article className={`photo-upload-card ${isUploaded ? "is-complete" : ""} ${isWorking ? "is-uploading" : ""} ${phase === "error" ? "is-error" : ""}`} key={poseId}>
                   <div className="photo-preview">
                     <img src={previews[poseId] || `/images/ai/${poseId}.webp`} alt={t.poseNames[poseId]} decoding="async" width="1050" height="1400" />
                     {!previews[poseId] && <div className="guide-overlay"><span>{t.poseNames[poseId]}</span></div>}
-                    {uploaded[poseId] && <span className="upload-check">✓ {t.uploaded}</span>}
+                    {isWorking && <span className="upload-status" role="status"><i aria-hidden="true" />{phase === "optimizing" ? t.preparingPhoto : t.uploading}</span>}
+                    {isUploaded && <span className="upload-check">✓ {t.uploaded}</span>}
                   </div>
                   <div className="photo-card-copy"><h3>{t.poseNames[poseId]}</h3><p>{t.poseTips[poseId]}</p></div>
-                  <label className={`photo-picker ${uploading !== null && uploading !== poseId ? "is-disabled" : ""}`}>
-                    <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" disabled={uploading !== null} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void uploadPhoto(poseId, file); }} />
-                    {uploading === poseId ? t.uploading : uploaded[poseId] ? t.replacePhoto : t.choosePhoto}
+                  <label className={`photo-picker ${isWorking ? "is-disabled" : ""}`}>
+                    <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" disabled={isWorking} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void uploadPhoto(poseId, file); }} />
+                    {pickerText}
                   </label>
                 </article>
-              ))}
+                );
+              })}
             </div>
             {error && <p className="flow-error" role="alert">{error}</p>}
-            <button className="flow-primary" type="button" disabled={!allUploaded || busy || uploading !== null} onClick={submitAssessment}>{busy ? "…" : t.submit}<span>→</span></button>
+            <button className="flow-primary" type="button" disabled={!allUploaded || busy || anyUploading} onClick={submitAssessment}>{busy ? "…" : t.submit}<span>→</span></button>
             <p className="flow-privacy">🔒 {t.privacy}</p>
           </section>
         )}

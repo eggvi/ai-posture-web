@@ -25,11 +25,18 @@ test("landing page includes the approved content and responsive entry contract",
 
 test("assessment flow is limited to front, side, and back images", async () => {
   const flow = await source("app/ai-posture/start/page.tsx");
+  const styles = await source("app/globals.css");
 
   assert.match(flow, /const poseIds: PoseId\[\] = \["front", "side", "back"\]/);
   assert.match(flow, /正面、侧面和背面/);
   assert.match(flow, /writeDraft/);
   assert.match(flow, /removeDraft/);
+  assert.match(flow, /type UploadPhase = "idle" \| "optimizing" \| "uploading" \| "uploaded" \| "error"/);
+  assert.match(flow, /正在上传中/);
+  assert.match(flow, /imageKeysRef\.current/);
+  assert.match(flow, /1600 \/ longestEdge/);
+  assert.match(flow, /canvas\.toBlob\(resolve, "image\/jpeg", 0\.82\)/);
+  assert.match(styles, /\.upload-status/);
 });
 
 test("build contains the H5 routes and the syh-server proxy contract", async () => {
