@@ -60,13 +60,6 @@ type AssessmentPayload = {
   error: string | null;
 };
 
-/** 后端 pose type 映射 */
-const BACKEND_POSE: Record<PoseId, string> = {
-  front: "FRONT",
-  side: "SIDE",
-  back: "BACK",
-};
-
 const copy = {
   zh: {
     brand: "蛋壳跟练",
@@ -185,28 +178,6 @@ const copy = {
 } as const;
 
 const poseIds: PoseId[] = ["front", "side", "back"];
-
-// 后端 AIPostureConstants.GOALS 只接受这四个枚举值
-// 前端中英文 goalOptions 顺序一致，用索引映射
-// 0 改善日常体态/Everyday posture → IMPROVE_POSTURE
-// 1 颈肩不适与头前伸/Neck and shoulders → UNDERSTAND_POSTURE
-// 2 骨盆与腰背/Pelvis and lower back → UNDERSTAND_POSTURE
-// 3 腿型与膝踝对位/Leg and knee alignment → UNDERSTAND_POSTURE
-// 4 全面了解身体状态/A full posture overview → UNDERSTAND_POSTURE
-const GOAL_ENUM_BY_INDEX = [
-  "IMPROVE_POSTURE",
-  "UNDERSTAND_POSTURE",
-  "UNDERSTAND_POSTURE",
-  "UNDERSTAND_POSTURE",
-  "UNDERSTAND_POSTURE",
-];
-
-function mapGoalToEnum(goalText: string, options: readonly string[]): string {
-  const idx = options.indexOf(goalText);
-  if (idx >= 0 && idx < GOAL_ENUM_BY_INDEX.length) return GOAL_ENUM_BY_INDEX[idx];
-  return "UNDERSTAND_POSTURE"; // 默认
-}
-
 const emptyProfile: ProfileState = {
   nickname: "",
   age: "",
@@ -242,34 +213,13 @@ export default function AssessmentStartPage() {
   const t = copy[language];
   const allUploaded = poseIds.every((poseId) => uploaded[poseId]);
 
-  /** 将后端 AIPostureAssessmentRes 转为前端 AssessmentPayload */
-  const apiToPayload = useCallback((data: any): AssessmentPayload => {
-    const images = (data.images || []) as Array<{ poseType: string; originalUrl: string; annotatedUrl: string }>;
-    return {
-      assessmentId: String(data.id),
-      status: data.status,
-      profile: data.age ? { age: data.age, height: data.height, weight: data.weight, goal: data.goal } : null,
-      uploads: images.map((img: any) => ({
-        poseId: img.poseType?.toLowerCase() || "",
-        filename: "",
-        url: img.originalUrl || "",
-      })),
-      reportData: data.reportData,
-      annotatedImages: images.map((img: any) => ({
-        poseId: img.poseType?.toLowerCase() || "",
-        filename: "",
-        url: img.annotatedUrl || img.originalUrl || "",
-      })),
-      engineVersion: data.engineVersion,
-      error: data.errorMessage || null,
-    };
-  }, []);
-
-  const loadAssessment = useCallback(async (id: string) => {
-    const { syhApi } = await import("@/lib/syh-api-client");
-    const data = await syhApi.getAssessment(id);
-    const next = apiToPayload(data);
-    
+  const loadAssessment = useCallback(async (id: string, token: string) => {
+    const response = await fetch(`/api/assessments/${id}?token=${encodeURIComponent(token)}`, {
+      cache: "no-store",
+    });
+    const data = await response.json() as AssessmentPayload | { error?: string };
+    if (!response.ok) throw new Error(apiError(data, "Unable to load assessment"));
+    const next = data as AssessmentPayload;
     setPayload(next);
     if (next.status === "DRAFT") {
       setStage(2);
@@ -279,7 +229,7 @@ export default function AssessmentStartPage() {
       setStage(3);
     }
     return next;
-  }, [apiToPayload]);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -290,37 +240,11 @@ export default function AssessmentStartPage() {
       setLanguage(requestedLanguage?.startsWith("en") ? "en" : "zh");
       setEmbedded(params.get("embedded") === "1");
       const id = params.get("id") || "";
-      const token = params.get("token") || params.get("auth_token") || "";
-      const deviceToken = params.get("device_token") || params.get("deviceToken") || "";
-      if (token) {
-        // 存入 localStorage，之后所有请求自动带 X-Mp-LoginToken
-        localStorage.setItem("syh_auth_token", token);
-      }
-      if (deviceToken) {
-        // 存入 localStorage，之后所有请求自动带 X-DeviceToken
-        localStorage.setItem("syh_device_token", deviceToken);
-      }
-
-      // 检查是否已登录：URL 参数 / localStorage / App 注入任一有 token 即可
-      const hasToken = token || localStorage.getItem("syh_auth_token") || localStorage.getItem("ai_posture_token") || (window as any).syhAuthToken;
-      if (!hasToken) {
-        // 未登录 → 跳转登录页
-        window.location.href = `/ai-posture/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`;
-        return;
-      }
-
-      if (id) {
+      const token = params.get("token") || "";
+      if (id && token) {
         setAssessmentId(id);
-        loadAssessment(id).catch((reason) => {
-          // 加载失败（评估不存在/已删除/无权访问）时，清掉 URL 里的 id，回到全新开始，
-          // 而不是把错误卡死在页面上让用户无法继续
-          console.warn("[AI-POSTURE] loadAssessment failed, reset to fresh start:", reason);
-          const p = new URLSearchParams(window.location.search);
-          p.delete("id");
-          window.history.replaceState(null, "", `${window.location.pathname}?${p.toString()}`);
-          setAssessmentId("");
-          setStage(1);
-        });
+        setClientToken(token);
+        loadAssessment(id, token).catch((reason) => setError(String(reason.message || reason)));
       }
     });
     return () => {
@@ -329,13 +253,13 @@ export default function AssessmentStartPage() {
   }, [loadAssessment]);
 
   useEffect(() => {
-    if (!assessmentId || stage !== 3) return;
-    if (payload?.status === "SUCCEEDED" || payload?.status === "FAILED") return;
+    if (!assessmentId || !clientToken || stage !== 3) return;
+    if (payload?.status === "COMPLETED" || payload?.status === "FAILED") return;
     const timer = window.setInterval(() => {
-      loadAssessment(assessmentId).catch(() => undefined);
+      loadAssessment(assessmentId, clientToken).catch(() => undefined);
     }, 4000);
     return () => window.clearInterval(timer);
-  }, [assessmentId, loadAssessment, payload?.status, stage]);
+  }, [assessmentId, clientToken, loadAssessment, payload?.status, stage]);
 
   const updateProfile = (key: keyof ProfileState, value: string) => {
     setProfile((current) => ({ ...current, [key]: value }));
@@ -350,21 +274,32 @@ export default function AssessmentStartPage() {
     }
     setBusy(true);
     try {
-      // 调试：显示当前实际使用的 token 前12位，便于确认是新还是旧
-      const { getAuthToken, getDeviceToken } = await import("@/lib/syh-api-config");
-      const usedToken = getAuthToken();
-      const usedDevice = getDeviceToken();
-      console.log("[AI-POSTURE] token=", usedToken ? usedToken.slice(0, 12) + "..." : "(empty)", "device=", usedDevice ? usedDevice.slice(0, 12) + "..." : "(empty)");
-
-      // syh-server create: 无 body，只创建空评估（profile 在 submit 时提交）
-      const { syhApi } = await import("@/lib/syh-api-client");
-      const data = await syhApi.createAssessment();
-      
-      setAssessmentId(String(data.id));
-      // 保存 profile 到 state，submit 时用到
-      
       const params = new URLSearchParams(window.location.search);
-      params.set("id", String(data.id));
+      const response = await fetch("/api/assessments", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          profile: {
+            nickname: profile.nickname,
+            age: Number(profile.age),
+            height: Number(profile.height),
+            weight: Number(profile.weight),
+            occupation: profile.occupation,
+            goal: profile.goal,
+            painArea: profile.painArea,
+            painLevel: profile.painLevel,
+          },
+          source: params.get("source") || "ai-posture-page",
+          lang: language === "zh" ? "zh-CN" : "en",
+          embedded,
+        }),
+      });
+      const data = await response.json() as { assessmentId?: string; clientToken?: string; error?: string };
+      if (!response.ok || !data.assessmentId || !data.clientToken) throw new Error(apiError(data, "Unable to create assessment"));
+      setAssessmentId(data.assessmentId);
+      setClientToken(data.clientToken);
+      params.set("id", data.assessmentId);
+      params.set("token", data.clientToken);
       window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
       setStage(2);
     } catch (reason) {
@@ -374,11 +309,8 @@ export default function AssessmentStartPage() {
     }
   };
 
-  /** 记录每张照片在七牛上的 key（用于 submit） */
-  const [imageKeys, setImageKeys] = useState<Partial<Record<PoseId, string>>>({});
-
   const uploadPhoto = async (poseId: PoseId, file?: File) => {
-    if (!file || !assessmentId) return;
+    if (!file || !assessmentId || !clientToken) return;
     setError("");
     if (!file.type.match(/^image\/(jpeg|png|webp)$/) || file.size > 12 * 1024 * 1024) {
       setError(language === "zh" ? "请上传 12MB 以内的 JPG、PNG 或 WebP 照片" : "Upload a JPG, PNG, or WebP photo under 12MB");
@@ -388,11 +320,16 @@ export default function AssessmentStartPage() {
     setPreviews((current) => ({ ...current, [poseId]: preview }));
     setUploading(poseId);
     try {
-      const { syhApi } = await import("@/lib/syh-api-client");
-      // 单 pose 获取上传凭证
-      const credential = await syhApi.getUploadCredential(assessmentId, BACKEND_POSE[poseId]);
-      await syhApi.uploadToQiniu(credential, file);
-      setImageKeys((current) => ({ ...current, [poseId]: credential.key }));
+      const response = await fetch(`/api/assessments/${assessmentId}/images/${poseId}`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${clientToken}`,
+          "content-type": file.type,
+        },
+        body: file,
+      });
+      const data = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(apiError(data, "Upload failed"));
       setUploaded((current) => ({ ...current, [poseId]: true }));
     } catch (reason) {
       setUploaded((current) => ({ ...current, [poseId]: false }));
@@ -404,29 +341,17 @@ export default function AssessmentStartPage() {
 
   const submitAssessment = async () => {
     if (!allUploaded || busy) return;
-    const frontKey = imageKeys.front;
-    const sideKey = imageKeys.side;
-    const backKey = imageKeys.back;
-    if (!frontKey || !sideKey || !backKey) {
-      setError("Missing image keys");
-      return;
-    }
     setBusy(true);
     setError("");
     try {
-      const { syhApi } = await import("@/lib/syh-api-client");
-      const data = await syhApi.submitAssessment(assessmentId, {
-        age: Number(profile.age),
-        height: Number(profile.height),
-        weight: Number(profile.weight),
-        goal: mapGoalToEnum(profile.goal, t.goalOptions),
-        frontImageKey: frontKey,
-        sideImageKey: sideKey,
-        backImageKey: backKey,
+      const response = await fetch(`/api/assessments/${assessmentId}/submit`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${clientToken}` },
       });
+      const data = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(apiError(data, "Submission failed"));
       setStage(3);
-      // 开始轮询
-      setPayload(apiToPayload(data));
+      await loadAssessment(assessmentId, clientToken);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -516,7 +441,7 @@ export default function AssessmentStartPage() {
           </section>
         )}
 
-        {stage === 3 && payload?.status === "SUCCEEDED" && payload.reportData ? (
+        {stage === 3 && payload?.status === "COMPLETED" && payload.reportData ? (
           <ResultView payload={payload} t={t} activePose={activePose} setActivePose={setActivePose} restart={restart} />
         ) : stage === 3 && payload?.status === "FAILED" ? (
           <section className="flow-panel failure-panel"><div className="failure-icon">!</div><h2>{t.failed}</h2><p>{payload.error}</p><button className="flow-primary" type="button" onClick={restart}>{t.retry}</button></section>
@@ -524,7 +449,7 @@ export default function AssessmentStartPage() {
           <section className="flow-panel processing-panel">
             <div className="analysis-orbit"><span /><span /><span /><strong>AI</strong></div>
             <h2>{t.processingTitle}</h2><p>{t.processingBody}</p>
-            <ol className="processing-list"><li className="done">✓ {t.submitted}</li><li className={payload?.status === "QUEUED" ? "current" : "done"}>{payload?.status === "QUEUED" ? "•" : "✓"} {t.queued}</li><li className={payload?.status === "PROCESSING" ? "current" : ""}>• {t.running}</li></ol>
+            <ol className="processing-list"><li className="done">✓ {t.submitted}</li><li className={payload?.status === "SUBMITTED" ? "current" : "done"}>{payload?.status === "SUBMITTED" ? "•" : "✓"} {t.queued}</li><li className={payload?.status === "PROCESSING" ? "current" : ""}>• {t.running}</li></ol>
             {error && <p className="flow-error">{error}</p>}
           </section>
         ) : null}
