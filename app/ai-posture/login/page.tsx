@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { getOrCreateDeviceToken } from "@/lib/device";
@@ -159,29 +161,15 @@ function LoginForm() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--soft)] px-4">
-      <form className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-[var(--shadow)]" onSubmit={submitLogin}>
-        {/* Logo / 标题 */}
-        <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--mint-soft)]">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M12 2L3 7v6c0 5.25 3.83 10.15 9 11 5.17-.85 9-5.75 9-11V7l-9-5z"
-                fill="var(--mint)"
-                stroke="var(--mint-deep)"
-                strokeWidth="1.5"
-              />
-              <path
-                d="M8 12l3 3 5-6"
-                stroke="white"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+    <div className="login-page flex min-h-screen items-center justify-center bg-[var(--soft)] px-4">
+      <form className="login-card w-full max-w-sm rounded-2xl bg-white p-8 shadow-[var(--shadow)]" onSubmit={submitLogin}>
+        <div className="login-heading mb-8 text-center">
+          <div className="login-brand" aria-label="蛋壳跟练">
+            <img src="/images/brand/logo.jpg" alt="" width="40" height="40" />
+            <span>蛋壳跟练</span>
           </div>
-          <h1 className="login-title text-xl font-bold text-[var(--ink)]">AI 体态评估</h1>
-          <p className="mt-1 text-sm text-[var(--muted)]">手机号登录，开始你的体态分析</p>
+          <h1 className="login-title text-[var(--ink)]">AI 体态评估</h1>
+          <p className="login-subtitle text-[var(--muted)]">登录后开始你的体态分析</p>
         </div>
 
         {/* 错误提示 */}

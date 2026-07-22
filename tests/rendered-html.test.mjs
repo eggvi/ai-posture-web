@@ -54,6 +54,8 @@ test("build contains the H5 routes and the syh-server proxy contract", async () 
   const login = await source("app/ai-posture/login/page.tsx");
   const assessmentProxy = await source("app/api/v1/ai-posture/assessments/[[...path]]/route.ts");
   assert.match(login, /getSafeRedirect/);
+  assert.match(login, /images\/brand\/logo\.jpg/);
+  assert.match(login, />蛋壳跟练</);
   assert.doesNotMatch(login, /localStorage\.setItem\("ai_posture_token"/);
   assert.doesNotMatch(login, /params\.set\("token"/);
   assert.match(assessmentProxy, /isAllowedRoute/);
