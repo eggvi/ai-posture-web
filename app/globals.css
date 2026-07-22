@@ -1484,6 +1484,15 @@ footer {
   font-size: 12px;
 }
 
+.login-recovery {
+  display: grid;
+  width: fit-content;
+  min-width: 132px;
+  place-items: center;
+  margin: 12px auto 0;
+  text-decoration: none;
+}
+
 .processing-panel,
 .failure-panel {
   max-width: 680px;

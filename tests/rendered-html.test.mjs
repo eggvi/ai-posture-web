@@ -33,6 +33,8 @@ test("assessment flow is limited to front, side, and back images", async () => {
   assert.match(flow, /removeDraft/);
   assert.match(flow, /type UploadPhase = "idle" \| "optimizing" \| "uploading" \| "uploaded" \| "error"/);
   assert.match(flow, /正在上传中/);
+  assert.match(flow, /前往登录/);
+  assert.match(flow, /\(!sessionResponse\.ok \|\| !session\.authenticated\) && legacyToken/);
   assert.match(flow, /imageKeysRef\.current/);
   assert.match(flow, /1600 \/ longestEdge/);
   assert.match(flow, /canvas\.toBlob\(resolve, "image\/jpeg", 0\.82\)/);
@@ -56,9 +58,12 @@ test("build contains the H5 routes and the syh-server proxy contract", async () 
   assert.match(login, /getSafeRedirect/);
   assert.match(login, /images\/brand\/logo\.jpg/);
   assert.match(login, />蛋壳跟练</);
+  assert.match(login, /window\.location\.assign\(redirectTo\)/);
   assert.doesNotMatch(login, /localStorage\.setItem\("ai_posture_token"/);
   assert.doesNotMatch(login, /params\.set\("token"/);
   assert.match(assessmentProxy, /isAllowedRoute/);
+  assert.match(assessmentProxy, /clearAuthCookies/);
+  assert.match(assessmentProxy, /responseStatus = 401/);
   assert.doesNotMatch(assessmentProxy, /export const DELETE/);
 
   const dockerfile = await source("Dockerfile");

@@ -10,7 +10,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { AUTH_COOKIE, DEVICE_COOKIE, isSameOriginRequest } from "@/lib/server-auth";
+import { AUTH_COOKIE, clearAuthCookies, DEVICE_COOKIE, isSameOriginRequest } from "@/lib/server-auth";
 
 const SYH_BACKEND = "https://api.shareyourhealth.cn";
 const SYH_MP_APP_ID = "wx67532ea818b427d6";
@@ -70,13 +70,26 @@ async function proxy(request: NextRequest, { params }: { params: Promise<{ path?
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     const respText = await backendResp.text();
-    return new NextResponse(respText, {
-      status: backendResp.status,
+    let responseStatus = backendResp.status;
+    if (backendResp.status === 403) {
+      const responseData = (() => {
+        try { return JSON.parse(respText) as Record<string, unknown>; } catch { return null; }
+      })();
+      const authMessage = [responseData?.errMsg, responseData?.error, responseData?.message]
+        .find((value) => typeof value === "string");
+      if (typeof authMessage === "string" && /尚未登录|未登录|not logged in/i.test(authMessage)) {
+        responseStatus = 401;
+      }
+    }
+    const response = new NextResponse(respText, {
+      status: responseStatus,
       headers: {
         "Cache-Control": "no-store",
         "Content-Type": backendResp.headers.get("Content-Type") || "application/json",
       },
     });
+    if (responseStatus === 401) clearAuthCookies(response, request);
+    return response;
   } catch (error) {
     const timedOut = error instanceof Error && error.name === "TimeoutError";
     return NextResponse.json(

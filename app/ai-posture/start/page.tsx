@@ -124,6 +124,7 @@ const copy = {
     sessionExpired: "登录已过期，正在返回登录页…",
     statusUnavailable: "暂时无法获取分析进度，请检查网络后重新查询。",
     preparingPhoto: "正在优化照片…",
+    loginAction: "前往登录",
     health: "本页用于健康运动参考，不构成医疗诊断。如有疼痛、麻木或疾病，请咨询专业医疗人员。",
     privacy: "原始照片和报告按评估任务隔离存储，不用于公开展示。",
   },
@@ -182,6 +183,7 @@ const copy = {
     sessionExpired: "Your session expired. Returning to sign in…",
     statusUnavailable: "We cannot retrieve the analysis status right now. Check your connection and try again.",
     preparingPhoto: "Optimizing photo…",
+    loginAction: "Go to sign in",
     health: "For fitness and wellness reference only. This is not a medical diagnosis. Consult a clinician for pain, numbness, or illness.",
     privacy: "Original photos and reports are isolated by assessment and are not displayed publicly.",
   },
@@ -329,6 +331,7 @@ export default function AssessmentStartPage() {
   const uploadRunRef = useRef<Partial<Record<PoseId, number>>>({});
 
   const t = copy[language];
+  const needsLogin = /尚未登录|登录已过期|Session expired|sign in/i.test(error);
   const allUploaded = poseIds.every((poseId) => uploadPhases[poseId] === "uploaded");
   const anyUploading = poseIds.some((poseId) => uploadPhases[poseId] === "optimizing" || uploadPhases[poseId] === "uploading");
 
@@ -428,7 +431,10 @@ export default function AssessmentStartPage() {
         window.history.replaceState(null, "", `${window.location.pathname}${cleanQuery ? `?${cleanQuery}` : ""}`);
 
         try {
-          if (legacyToken) {
+          let sessionResponse = await fetch("/api/auth/session", { cache: "no-store", credentials: "same-origin" });
+          let session = await sessionResponse.json() as { authenticated?: boolean };
+
+          if ((!sessionResponse.ok || !session.authenticated) && legacyToken) {
             const exchange = await fetch("/api/auth/session", {
               method: "POST",
               credentials: "same-origin",
@@ -436,15 +442,15 @@ export default function AssessmentStartPage() {
               body: JSON.stringify({ token: legacyToken, deviceToken }),
             });
             if (!exchange.ok) throw new Error("Unable to establish a secure session");
-            for (const key of ["syh_auth_token", "ai_posture_token"]) localStorage.removeItem(key);
+            sessionResponse = await fetch("/api/auth/session", { cache: "no-store", credentials: "same-origin" });
+            session = await sessionResponse.json() as { authenticated?: boolean };
           }
 
-          const sessionResponse = await fetch("/api/auth/session", { cache: "no-store", credentials: "same-origin" });
-          const session = await sessionResponse.json() as { authenticated?: boolean };
           if (!sessionResponse.ok || !session.authenticated) {
             redirectToLogin();
             return;
           }
+          for (const key of ["syh_auth_token", "ai_posture_token"]) localStorage.removeItem(key);
 
           if (id) {
             setAssessmentId(id);
@@ -697,6 +703,7 @@ export default function AssessmentStartPage() {
               <span>{t.consent} <a href={TERMS_URL} target="_blank" rel="noreferrer">{language === "zh" ? "用户协议" : "Terms"}</a> · <a href={PRIVACY_URL} target="_blank" rel="noreferrer">{language === "zh" ? "隐私政策" : "Privacy policy"}</a></span>
             </label>
             {error && <p className="flow-error" role="alert">{error}</p>}
+            {needsLogin && <a className="flow-secondary login-recovery" href="/ai-posture/login">{t.loginAction}</a>}
             <button className="flow-primary" type="submit" disabled={busy}>{busy ? "…" : t.next}<span>→</span></button>
           </form>
         )}

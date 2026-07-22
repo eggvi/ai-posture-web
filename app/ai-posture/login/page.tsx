@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { getOrCreateDeviceToken } from "@/lib/device";
 
@@ -45,7 +45,6 @@ function apiMessage(data: ApiEnvelope, fallback: string): string {
 }
 
 function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = getSafeRedirect(searchParams.get("redirect"));
 
@@ -143,8 +142,10 @@ function LoginForm() {
       const data = (await resp.json().catch(() => ({}))) as ApiEnvelope;
 
       if (resp.ok && isApiSuccess(data)) {
-        router.replace(redirectTo);
-        router.refresh();
+        for (const key of ["syh_auth_token", "ai_posture_token", "syh_device_token"]) {
+          localStorage.removeItem(key);
+        }
+        window.location.assign(redirectTo);
       } else {
         setError(apiMessage(data, "登录失败，请检查验证码"));
       }
@@ -153,7 +154,7 @@ function LoginForm() {
     } finally {
       setLogging(false);
     }
-  }, [mobile, code, redirectTo, router]);
+  }, [mobile, code, redirectTo]);
 
   const submitLogin = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
