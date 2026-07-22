@@ -54,6 +54,7 @@ test("build contains the H5 routes and the syh-server proxy contract", async () 
   await Promise.all(requiredRoutes.map((pathname) => access(new URL(pathname, root))));
 
   const login = await source("app/ai-posture/login/page.tsx");
+  const apiClient = await source("lib/syh-api-client.ts");
   const assessmentProxy = await source("app/api/v1/ai-posture/assessments/[[...path]]/route.ts");
   assert.match(login, /getSafeRedirect/);
   assert.match(login, /images\/brand\/logo\.jpg/);
@@ -61,6 +62,7 @@ test("build contains the H5 routes and the syh-server proxy contract", async () 
   assert.match(login, /window\.location\.assign\(redirectTo\)/);
   assert.doesNotMatch(login, /localStorage\.setItem\("ai_posture_token"/);
   assert.doesNotMatch(login, /params\.set\("token"/);
+  assert.match(apiClient, /typeof value\.id === "string" && \/\^\\d\+\$\//);
   assert.match(assessmentProxy, /isAllowedRoute/);
   assert.match(assessmentProxy, /clearAuthCookies/);
   assert.match(assessmentProxy, /responseStatus = 401/);

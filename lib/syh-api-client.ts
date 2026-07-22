@@ -31,7 +31,7 @@ export type SubmitInput = {
 // ============ 后端实际响应体（AIPostureAssessmentRes） ============
 
 export type AssessmentDetail = {
-  id: number;                         // assessmentId (Long)
+  id: number | string;                // assessmentId (Long，后端通常序列化为字符串以避免精度丢失)
   status: string;                     // DRAFT | QUEUED | PROCESSING | SUCCEEDED | FAILED
   age: number | null;
   height: number | null;
@@ -66,7 +66,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseAssessmentDetail(value: unknown): AssessmentDetail {
-  if (!isRecord(value) || typeof value.id !== "number" || typeof value.status !== "string" || !Array.isArray(value.images)) {
+  const validId = isRecord(value) && (
+    (typeof value.id === "number" && Number.isSafeInteger(value.id)) ||
+    (typeof value.id === "string" && /^\d+$/.test(value.id))
+  );
+  if (!validId || !isRecord(value) || typeof value.status !== "string" || !Array.isArray(value.images)) {
     throw new ApiError("评估服务返回了无法识别的数据", 502);
   }
   return value as AssessmentDetail;
