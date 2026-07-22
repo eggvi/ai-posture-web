@@ -56,4 +56,4 @@ npm test
 - 生产域名必须使用有效 HTTPS 证书；非本地 HTTP 请求会被重定向到 HTTPS；
 - 七牛上传地址必须为 HTTPS；
 - 用户协议与隐私政策链接必须保持可访问；
-- 可使用 `.openai/hosting.json` 对应的 Sites 项目发布，也可使用仓库内多阶段 Dockerfile 构建 `dist/standalone`。
+- 可使用 `.openai/hosting.json` 对应的 Sites 项目发布，也可使用仓库内多阶段 Dockerfile 构建 Vinext 生产镜像。

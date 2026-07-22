@@ -46,6 +46,7 @@ test("build contains the H5 routes and the syh-server proxy contract", async () 
     "app/api/auth/session/route.ts",
     "app/api/v1/users/[[...path]]/route.ts",
     "app/api/v1/ai-posture/assessments/[[...path]]/route.ts",
+    "server.mjs",
     "dist/server/index.js",
   ];
   await Promise.all(requiredRoutes.map((pathname) => access(new URL(pathname, root))));
@@ -57,4 +58,8 @@ test("build contains the H5 routes and the syh-server proxy contract", async () 
   assert.doesNotMatch(login, /params\.set\("token"/);
   assert.match(assessmentProxy, /isAllowedRoute/);
   assert.doesNotMatch(assessmentProxy, /export const DELETE/);
+
+  const dockerfile = await source("Dockerfile");
+  assert.match(dockerfile, /COPY --from=builder \/app\/dist \.\/dist/);
+  assert.doesNotMatch(dockerfile, /dist\/standalone/);
 });
